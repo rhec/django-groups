@@ -1,5 +1,6 @@
 import datetime
 import warnings
+import logging
 
 from django.db import models
 from django.db.models.options import FieldDoesNotExist
@@ -27,32 +28,21 @@ def _get_queryset(klass):
         manager = klass._default_manager
     return manager.all()
 
+class GroupInterface(models.Model):
+    """
+    The methods required to be considered a group, without the db fields.
+    This is useful if you have a different SlugField strategy, for example.
+    It still requires that you apply it to a model with the following fields:
+      id
+      slug
 
-class Group(models.Model):
+    There are other fields you'll need to define for your Group to work with
+    the default pinax templates, but this is all you need for the actual
+    Group functions to work.
     """
-    a group is a group of users with a common interest
-    """
-    
-    slug = models.SlugField(_("slug"), unique=True)
-    name = models.CharField(_("name"), max_length=80, unique=True)
-    creator = models.ForeignKey(User, verbose_name=_("creator"), related_name="%(class)s_created")
-    created = models.DateTimeField(_("created"), default=datetime.datetime.now)
-    description = models.TextField(_("description"))
-    
-    # nested groups
-    content_type = models.ForeignKey(ContentType, null=True, blank=True)
-    object_id = models.PositiveIntegerField(null=True, blank=True)
-    group = generic.GenericForeignKey("content_type", "object_id")
-    
-    def __unicode__(self):
-        return self.name
     
     def get_url_kwargs(self):
-        kwargs = {}
-        if self.group:
-            kwargs.update(self.group.get_url_kwargs())
-        kwargs.update({"%s_slug" % self._meta.object_name.lower(): self.slug})
-        return kwargs
+        return {"%s_slug" % self._meta.object_name.lower(): self.slug}
     
     def member_queryset(self):
         if not hasattr(self, "_members_field"):
@@ -67,8 +57,9 @@ class Group(models.Model):
                 self._members_field = field
         else:
             field = self._members_field
+        logging.debug("field? %s" % field)
         if isinstance(field, models.ManyToManyField) and issubclass(field.rel.to, User):
-            return self.members.all()
+            return getattr(self, self._members_field.name).all()
         else:
             raise NotImplementedError("You must define a member_queryset for %s" % str(self.__class__))
     
@@ -97,6 +88,35 @@ class Group(models.Model):
         if commit:
             instance.save()
         return instance
+        
+    class Meta(object):
+        abstract=True
+
+class Group(GroupInterface):
+    """
+    a group is a group of users with a common interest
+    """
+    
+    slug = models.SlugField(_("slug"), unique=True)
+    name = models.CharField(_("name"), max_length=80, unique=True)
+    creator = models.ForeignKey(User, verbose_name=_("creator"), related_name="%(class)s_created")
+    created = models.DateTimeField(_("created"), default=datetime.datetime.now)
+    description = models.TextField(_("description"))
+    
+    # nested groups
+    content_type = models.ForeignKey(ContentType, null=True, blank=True)
+    object_id = models.PositiveIntegerField(null=True, blank=True)
+    group = generic.GenericForeignKey("content_type", "object_id")
+    
+    def __unicode__(self):
+        return self.name
+
+    def get_url_kwargs(self):
+        kwargs = {}
+        if self.group:
+            kwargs.update(self.group.get_url_kwargs())
+        kwargs.update({"%s_slug" % self._meta.object_name.lower(): self.slug})
+        return kwargs
     
     class Meta(object):
         abstract = True
